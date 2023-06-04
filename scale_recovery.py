@@ -6,7 +6,7 @@ from torchvision import transforms
 from sklearn import linear_model
 
 import torch
-import cv2
+import cv2 as cv
 
 #FLOW_THRESHOLD = 10
 
@@ -14,13 +14,20 @@ def estimate_scaling_factor(d, d_prime):
     ransac = linear_model.RANSACRegressor(
                         estimator=linear_model.LinearRegression(
                             fit_intercept=False),
-                        min_samples=3,
+                        min_samples=15,
                         max_trials=100,
                         stop_probability=0.99,
                         residual_threshold=0.1,
                         )
+    
     d_mask = d>0
     d_prime_mask = d_prime>0
+    count = 0
+    for i in range(len(d_prime_mask)):
+        if d_prime_mask[i] == True:
+            print(i, d_prime_mask[i], d_prime[i])
+            count+=1
+    print(count)
     mask = d_mask*d_prime_mask
     d_non_zero = d*mask
     d_prime_non_zero = d_prime*mask
@@ -31,13 +38,50 @@ def estimate_scaling_factor(d, d_prime):
     scale = ransac.estimator_.coef_[0, 0]
     return scale
 
-def triangulate(points, matched_points, R, t, K):
-    P1_proj = K @ torch.cat((torch.eye(3, requires_grad=False), torch.zeros(size=t.shape, requires_grad=False)), dim=-1)
-    P2_proj = K @ torch.cat((R, t), dim=-1)
-    #triangulated_points = cv2.triangulatePoints(P1_proj.detach().numpy(), P2_proj.detach().numpy(), points, matched_points)
-    #points_euclidean = cv2.convertPointsFromHomogeneous(triangulated_points.transpose(1, 0)).squeeze(1)
-    points_euclidean = triangulate_points(P1_proj.detach().numpy(), P2_proj.detach().numpy(), points, matched_points)
-    return points_euclidean
+def triangulate(kp1, kp2, R, t, K):
+    P1_proj = K @ torch.cat((torch.eye(3, requires_grad=False), torch.zeros(size=t.shape, requires_grad=False).view(3, 1)), dim=1)
+    P2_proj = K @ torch.cat((R, t.view(3,1)), dim=-1)
+    P1_proj = P1_proj.detach().numpy()
+    P2_proj = P2_proj.detach().numpy()
+
+    P1_proj = np.eye(4)
+    P2_proj = torch.cat((R, t.view(3,1)), dim=-1)
+    P2_proj = P2_proj.detach().numpy()
+
+    print(kp1.shape)
+
+    kp1_norm = kp1.copy()
+    kp2_norm = kp2.copy()
+    K = K.detach().numpy()
+    kp1_norm[:, 0] = \
+        (kp1[:, 0] - K[2,0]) /  K[0,0]
+    kp1_norm[:, 1] = \
+        (kp1[:, 1] - K[2,1]) / K[1,1]
+    kp2_norm[:, 0] = \
+        (kp2[:, 0] - K[2,0]) / K[0,0]
+    kp2_norm[:, 1] = \
+        (kp2[:, 1] - K[2,1]) / K[1,1]
+    triangulated_points = cv.triangulatePoints(P1_proj[:3], P2_proj[:3], kp1_norm, kp2_norm)
+    triangulated_points = triangulated_points.astype(np.float64)
+    print("triang_done")
+    triangulated_points /= triangulated_points[3]
+    X2 = P2_proj[:3] @ triangulated_points
+    
+    #points = cv.convertPointsFromHomogeneous(triangulated_points)
+    print("DONE")
+    #print(triangulated_points)
+    #print("----\n", triangulated_points[3])
+    depth = []
+    #print("d created")
+    for i in range(0):#len(points[0])):
+        #print(i, triangulated_points[2,i], triangulated_points[3,i])
+        try:
+            depth.append(triangulated_points[2,i]/triangulated_points[3,i])
+        except:
+            depth.append(triangulated_points[2,i]/triangulated_points[3,i])
+    print(X2)
+    #points_euclidean = triangulate_points(P1_proj.detach().numpy(), P2_proj.detach().numpy(), points, matched_points)
+    return X2
 
 def triangulate_nviews(P, ip):
     """
@@ -71,13 +115,14 @@ def triangulate_points(P1, P2, x1, x2):
     for i in range(len(x1[0])):
         p1 = np.array([x1[0,i], x1[1,i], 1])
         p2 = np.array([x2[0,i], x2[1,i], 1])
+        print(p1, p2)
         X.append(triangulate_nviews([P1, P2],[p1, p2]))
+    print(X)
     return np.array(X)
 
 
-
 def simple_scale_recovery(kp1, kp2, R, t, K, depth):
-
+    
     d_prime = triangulate(kp1, kp2, R, t, K)
     return estimate_scaling_factor(depth, d_prime)
 """
