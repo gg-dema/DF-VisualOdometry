@@ -1,7 +1,8 @@
 from typing import Optional, Dict
-from camera_module import CameraProperty
+from camera_module import Camera
 import numpy as np
 import cv2
+import torch
 
 
 # ------------------------------------------------
@@ -41,7 +42,6 @@ def calc_GRIC(res, sigma, n, model: str):
     sum_ += n * D * np.log(R) + K * np.log(R * n)
 
     return sum_
-
 
 def calc_residual_H(H_in, kp1, kp2):
     """
@@ -95,7 +95,6 @@ def calc_residual_H(H_in, kp1, kp2):
 
     return res
 
-
 def calc_residual_F(F, kp1, kp2):
     """
     Compute fundamental matrix residual
@@ -121,35 +120,46 @@ def calc_residual_F(F, kp1, kp2):
     res = m1Fm0 ** 2 / (np.sum(Fm0[:2] ** 2, axis=0) + np.sum(Ftm1[:2] ** 2, axis=0))
     return res
 
-
 # ------------------------------------------------
 # TRACKER PART (epipolar, PnP, interface)
 # ------------------------------------------------
 
 class ETracker:
 
-    def __init__(self, camera_prop: CameraProperty):
+    def __init__(self, camera_prop: Camera):
         self.camera_prop = camera_prop
 
     def simple_E_estimation(self, kp1, kp2) -> Optional[np.array]:
         """ Estimate E matrix without count inliers [ ranSac by openCv2 ] """
-        E_matrix, _ = cv2.findEssentialMat(kp1, kp2)
+        E_matrix, _ = cv2.findEssentialMat(kp1, kp2,
+                                           focal=self.camera_prop.fx,
+                                           pp=(self.camera_prop.px_0, self.camera_prop.py_0),
+                                           )
         if not self.valid_estimation(E_matrix, kp1, kp2):
             return None
         return E_matrix
 
-    def robust_E_estimation(self, kp1, kp2, iteration) -> Optional[np.array]:
-        """ eval the Essential matrix keeping into account the inlier:"""
-        E_matrix = ...
-        # TODO : add iterative methods form paper: # http://www.hilandtom.com/tombotterill/Botterill-Mills-Green-2011-RefineE.pdf
-        if self.valid_estimation(E_matrix, kp1, kp2):
-            return E_matrix
+    def robust_E_estimation(self, kp1, kp2, iteration=10) -> Optional[np.array]:
+        """ eval the Essential matrix keeping into account the inlier [multiple run of ranSac] :"""
+        inliner_counter_best = 0
+        best_E_Matrix = np.zeros((3, 3))
+        for i in range(iteration):
+            E_matrix, E_inliner = cv2.findEssentialMat(kp1, kp2,
+                                                       focal=self.camera_prop.fx,
+                                                       pp=(self.camera_prop.px_0, self.camera_prop.py_0),
+                                                       )
+            if inliner_counter_best < E_inliner.sum():
+                best_E_Matrix = E_matrix
+
+        if self.valid_estimation(best_E_Matrix, kp1, kp2):
+            return best_E_Matrix
         else:
             return None
 
     def valid_estimation(self, E_matrix, kp1, kp2) -> bool:
 
-        res_E = calc_residual_F(E_matrix, kp1, kp2) # idk why we call resiudal F
+        res_E = calc_residual_F(E_matrix, kp1, kp2)
+        # idk why we call resiudal F
 
         H, _ = cv2.findHomography(kp1, kp2)
         res_H = calc_residual_H(H, kp1, kp2)
@@ -161,11 +171,12 @@ class ETracker:
         )
         return good_approx
 
-
     def pose_estimation(self, kp1, kp2, E_matrix) -> Dict:
+
         _, R, t, _ = cv2.recoverPose(E_matrix, kp1, kp2,
-                                     focal=self.camera_prop.fx,
-                                     pp=(self.camera_prop.px_0, self.camera_prop.py_0))
+                                     #focal=self.camera_prop.fx,
+                                     #pp=(self.camera_prop.px_0, self.camera_prop.py_0)
+                                     )
         return {'R': R, 't': t}
 
 
@@ -174,13 +185,44 @@ class PnpTracker:
     def __init__(self, camera_prop):
         self.camera_prop = camera_prop
 
-    def pose_estimation(self, kp1, kp2) -> Dict:
-        pass
+    def pose_estimation(self, kp1, kp2, depth, robust=False, iter=None) -> Dict:
 
+        kp_3d = self.convert_coords(kp1, depth=depth)
+        if robust:
+            R, t = self.robust_pnp_solver(kp_3d, kp2, iter=iter)
+        else:
+            R, t = self.simple_pnp_solver(kp_3d, kp2)
+        return {'R': R, 't': t}
+
+    def simple_pnp_solver(self, kp_3d, kp_2d):
+        # simple ransac
+        flag, R_matrix, t_vect, inlier = cv2.solvePnPRansac(
+            objectPoints=kp_3d.astype(np.float32),
+            imagePoints=kp_2d.astype(np.float32),
+            cameraMatrix=self.camera_prop.intrinsic_matrix,
+            distCoeffs=None
+        )
+        if flag:
+            # Rodrigues : convert rotation vect to rot matrix
+            R_matrix = cv2.Rodrigues(R_matrix)[0]
+            return R_matrix, t_vect
+
+    def robust_pnp_solver(self, kp_3d, kp_2d, iter=10):
+        return 0, 0
+
+    def convert_coords(self, kp, depth):
+        kp_homo = np.concatenate((kp, np.ones((kp.shape[0], 1))), axis=1).T
+        return ((np.linalg.inv(self.camera_prop.intrinsic_matrix) @ kp_homo) * depth).T
+
+
+    def project_2d_img_to_3d_world(self, kp, depth):
+        K_inv = np.linalg.inv(self.camera_prop.intrinsic_matrix)
+        kp_homo = np.concatenate((kp, np.ones((kp.shape[0], 1))), axis=1).T
+        return ((np.linalg.inv(K_inv) @ kp_homo) * depth).T
 
 class TrackerInterface:
 
-    def __init__(self, camera_prop: CameraProperty, config_dict: dict):
+    def __init__(self, camera_prop: Camera, config_dict: dict):
         self.e_tracker = ETracker(camera_prop)
         self.pnp_tracker = PnpTracker(camera_prop)
         self.config_dict = config_dict
@@ -193,8 +235,8 @@ class TrackerInterface:
         assert kp1.shape == kp2.shape
 
         # choose how we want estimate the E matrix
-        if self.config_dict['robust_E_tracker']:
-            valid_E = self.e_tracker.robust_E_estimation(kp1, kp2, iteration=self.config_dict['robust_iteration'])
+        if self.config_dict['robust_tracker']:
+            valid_E = self.e_tracker.robust_E_estimation(kp1, kp2, iteration=self.config_dict['numb_robust_iter'])
         else:
             valid_E = self.e_tracker.simple_E_estimation(kp1, kp2)
 
@@ -206,36 +248,49 @@ class TrackerInterface:
     def get_pose_from_3d(self,
                          kp1: np.array,
                          kp2: np.array,
+                         depth: np.array
                          ) -> Dict:
-        assert len(kp1.shape) == 3
-        assert len(kp2.shape) == 2
-        assert len(kp1) == len(kp2)
-
-        return self.pnp_tracker.pose_estimation(kp1, kp2)
+        assert (len(kp1) == len(kp2)) and (len(kp1) == len(depth))
+        if self.config_dict['robust_tracker']:
+            return self.pnp_tracker.pose_estimation(kp1, kp2, depth, robust=True, iter=self.config_dict['numb_robust_iter'])
+        else:
+            return self.pnp_tracker.pose_estimation(kp1, kp2, depth)
 
 
 """ main just for testing """
 if __name__ == '__main__':
     import pickle
 
+    def load_point_3d(path):
+        with open(path, 'rb') as f:
+            kp1x, kp1y, z, kp2x, kp2y = pickle.load(f)
+        kp1 = np.array((kp1x, kp1y)).T
+        kp2 = np.array((kp2x, kp2y)).T
+        z = z.detach().numpy()
+        return kp1, kp2, z
+
+    def load_point_2d(path):
+        with open(path, 'rb') as f:
+            kp1x, kp1y, kp2x, kp2y = pickle.load(f)
+
+        kp1 = np.array((kp1x, kp1y)).T
+        kp2 = np.array((kp2x, kp2y)).T
+        return kp1, kp2
+
     default_camera_calib = [
         [718.856, 0.00000, 607.1928],
         [0.00000, 718.856, 185.2157],
         [0.00000, 0.00000, 1.000000],
     ]
-
-    cam_prop = CameraProperty(np.array(default_camera_calib))
-
-    config_dict = {'robust_E_tracker': False, }
+    cam_prop = Camera(np.array(default_camera_calib))
+    config_dict = {'robust_tracker': False,
+                   'numb_robust_iter': 10}
     tracker_ui = TrackerInterface(cam_prop, config_dict)
 
     # test 2d:
-    with open('test/matches.pkl', 'rb') as f:
-        cols, rows, matched_cols, matched_rows = pickle.load(f)
 
-    kp1 = np.array((rows, cols)).T
-    kp2 = np.array((matched_rows, matched_cols)).T
-
+    kp1, kp2 = load_point_2d('old/test/matches.pkl')
+    print('\t E_tracker')
     pose = tracker_ui.get_pose_from_2d(kp1, kp2)
     print('R:', pose['R'])
     print('t', pose['t'])
@@ -244,3 +299,8 @@ if __name__ == '__main__':
     # pose_re_scaled = SCALE_POSE(pose, IDK_WTF_U_NEED)
 
     # test 3d
+    print('\t PNP_tracker')
+    kp1, kp2, z = load_point_3d('old/test/matches_with_depth.pkl')
+    pose = tracker_ui.get_pose_from_3d(kp1, kp2, z)
+    print('R:', pose['R'])
+    print('t', pose['t'])
