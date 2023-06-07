@@ -174,8 +174,8 @@ class ETracker:
     def pose_estimation(self, kp1, kp2, E_matrix) -> Dict:
 
         _, R, t, _ = cv2.recoverPose(E_matrix, kp1, kp2,
-                                     #focal=self.camera_prop.fx,
-                                     #pp=(self.camera_prop.px_0, self.camera_prop.py_0)
+                                     focal=self.camera_prop.fx,
+                                     pp=(self.camera_prop.px_0, self.camera_prop.py_0)
                                      )
         return {'R': R, 't': t}
 

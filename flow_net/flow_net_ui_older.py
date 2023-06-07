@@ -1,3 +1,7 @@
+
+
+
+
 from flow_net.flow_utils import Network, estimate
 import math
 import torch
@@ -7,10 +11,10 @@ import PIL.Image
 import matplotlib.pyplot as plt
 
 N_PATCHES = 10
-N = 500
-THRESHOLD = 3
+N = 2000
+THRESHOLD = -1000
 
-class Flow_net_ui():
+class Flow_net_ui_older():
     def __init__(self) -> None:
         self.net = Network().to("cuda")
         self.net.eval()
@@ -38,7 +42,7 @@ class Flow_net_ui():
                     #follow the flow and find ourselves in p0_=y+dy, x+dx. p0_ is the match of y,x
                     p0_=tuple(map(sum, zip((y,x), (dy,dx))))
                     #sometimes the flow might lead to out of image points, we discard those
-                    if p0_[0]>=max_y or p0_[1]>=max_x or p0_[0]<0 or p0_[1]<0: warped[:,y,x] = -10000
+                    if p0_[0]>=max_y or p0_[1]>=max_x or p0_[0]<0 or p0_[1]<0: warped[:,y,x] = 10000
                     #backward flow in p0_
                     else: warped[:,y,x] = backward[:, p0_[0], p0_[1]]
                 except Exception:
@@ -57,11 +61,8 @@ class Flow_net_ui():
 
         w = self.warp(forward, backward)
         #consistency: in the paper it's actually -forwad -warped, but it doesn't work so whatever
-        C = forward + w
-        #consistency along x + consistency along y, absolute value ofc
-        #C_total = abs(C[0]) + abs(C[1])
+        C = forward - w
         C_total = C[0] + C[1]
-        
         rows = []
         cols = []
         patch_x = int(C_total.shape[1] / N_PATCHES)#1024
@@ -77,12 +78,10 @@ class Flow_net_ui():
                     flat_partial = partial_c.flatten()
                     #check how many pixels have consistency above threshold, we will only select pixels that are above threshold
                     for p in flat_partial:
-                        if abs(p)<THRESHOLD: q+=1 #q=nr of pixel with consistency above threshold
+                        if p>THRESHOLD: q+=1 #q=nr of pixel with consistency above threshold
                     #esither select the top N/N_PATCHES in the best case, but if there are a lot of pixels with C lower than threshold select the remaining q
-                    k=min(100, q)
-                    #k = q#TODO MAKE THIS BETTER
-                    #print(k,q)
-                    top_v, top_i = torch.topk(input=abs(flat_partial), k=k, largest=False)
+                    k=min(int(N/(N_PATCHES**2)), q)
+                    top_v, top_i = torch.topk(input=flat_partial, k=k)
 
                     rows_p, cols_p = np.unravel_index(top_i, partial_c.shape)#unraveled relatively to the current patch
                     #unraveled relatively to the whole img
@@ -92,14 +91,12 @@ class Flow_net_ui():
         #TOP N OVER THE WHOLE IMAGE, but top k locally is better
         if mode == 'top_n':
             flattened_c = C_total.flatten()
-            top_v, top_i = torch.topk(input=abs(flattened_c), k=1000, largest = False)
+            top_v, top_i = torch.topk(input=flattened_c, k=1000)
             rows, cols = np.unravel_index(top_i, C_total.shape)
 
         
         fx = forward[0] #horizontal flow
         fy = forward[1] #vertical flow
-        bx = backward[0] #horizontal flow
-        by = backward[1] #vertical flow
         matched_rows=[]
         matched_cols=[]
         #iterate over all the points selected as matchings, reminder that (rows, cols) includes every point to be matched
@@ -110,28 +107,18 @@ class Flow_net_ui():
             p0_=tuple(map(sum, zip(p0, (dy,dx)))) #matching point, obtained by following the flow in p0
             matched_rows.append(p0_[0]) 
             matched_cols.append(p0_[1])
-        
         if draw:
             for i in range(len(rows)):
                 p0=(rows[i],cols[i]) #point to be matched
                 p0_=(matched_rows[i], matched_cols[i])
-                dx_f=int(fx[p0])
-                dy_f=int(fy[p0])
-                dx=int(bx[p0_])
-                dy=int(by[p0_])
-                p0_back=tuple(map(sum, zip(p0_, (dy,dx))))
-                #print("forward",p0, "+", dy_f,dx_f,"=",p0_)
-                #print("backward", p0_, "+", dy,dx,"=",p0_back, "warp:", w[:,p0[0], p0[1]], backward[:,p0_[0], p0_[1]])
-                #print("consistency:", C_total[p0])
+                #print(p0, "+", dy,dx,"=",p0_, w[:,p0[0],p0[1]])
 
                 #color in red the matching pixels:
                 tenOne[:,p0[0], p0[1]] = torch.FloatTensor([255,0,0])
                 tenTwo[:,p0_[0], p0_[1]] = torch.FloatTensor([255,0,0])
-                #print(C_total[p0[0], p0[1]])
             fig, axes = plt.subplots(1, 2)
             axes[0].imshow(tenOne.permute(1,2,0).detach().numpy())
             axes[1].imshow(tenTwo.permute(1,2,0).detach().numpy())
             plt.tight_layout()
             plt.show()
         return cols, rows, matched_cols, matched_rows
-

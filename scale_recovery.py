@@ -23,7 +23,7 @@ def estimate_scaling_factor(d, d_prime):
     d_mask = d>0
     d_prime_mask = d_prime>0
     count = 0
-    for i in range(len(d_prime_mask)):
+    for i in range(0):#(len(d_prime_mask)):
         if d_prime_mask[i] == True:
             print(i, d_prime_mask[i], d_prime[i])
             count+=1
@@ -39,20 +39,16 @@ def estimate_scaling_factor(d, d_prime):
     return scale
 
 def triangulate(kp1, kp2, R, t, K):
-    P1_proj = K @ torch.cat((torch.eye(3, requires_grad=False), torch.zeros(size=t.shape, requires_grad=False).view(3, 1)), dim=1)
-    P2_proj = K @ torch.cat((R, t.view(3,1)), dim=-1)
-    P1_proj = P1_proj.detach().numpy()
-    P2_proj = P2_proj.detach().numpy()
+    eye = np.eye(3)
+    zeros = np.zeros(t.shape).reshape(3, 1)
 
-    P1_proj = np.eye(4)
-    P2_proj = torch.cat((R, t.view(3,1)), dim=-1)
-    P2_proj = P2_proj.detach().numpy()
-
+    P1_proj = np.matmul(K, np.concatenate((eye, zeros), axis=1))
+    P2_proj = np.matmul(K, np.concatenate((R, t.reshape(3, 1)), axis=-1))
     print(kp1.shape)
+    print(P1_proj)
 
     kp1_norm = kp1.copy()
     kp2_norm = kp2.copy()
-    K = K.detach().numpy()
     kp1_norm[:, 0] = \
         (kp1[:, 0] - K[2,0]) /  K[0,0]
     kp1_norm[:, 1] = \
@@ -61,7 +57,7 @@ def triangulate(kp1, kp2, R, t, K):
         (kp2[:, 0] - K[2,0]) / K[0,0]
     kp2_norm[:, 1] = \
         (kp2[:, 1] - K[2,1]) / K[1,1]
-    triangulated_points = cv.triangulatePoints(P1_proj[:3], P2_proj[:3], kp1_norm, kp2_norm)
+    triangulated_points = cv.triangulatePoints(P1_proj[:3], P2_proj[:3], kp1_norm.astype(np.float64), kp2_norm.astype(np.float64))
     triangulated_points = triangulated_points.astype(np.float64)
     print("triang_done")
     triangulated_points /= triangulated_points[3]
@@ -69,19 +65,9 @@ def triangulate(kp1, kp2, R, t, K):
     
     #points = cv.convertPointsFromHomogeneous(triangulated_points)
     print("DONE")
-    #print(triangulated_points)
-    #print("----\n", triangulated_points[3])
-    depth = []
-    #print("d created")
-    for i in range(0):#len(points[0])):
-        #print(i, triangulated_points[2,i], triangulated_points[3,i])
-        try:
-            depth.append(triangulated_points[2,i]/triangulated_points[3,i])
-        except:
-            depth.append(triangulated_points[2,i]/triangulated_points[3,i])
-    print(X2)
+    #print(X2[2])
     #points_euclidean = triangulate_points(P1_proj.detach().numpy(), P2_proj.detach().numpy(), points, matched_points)
-    return X2
+    return X2[2]
 
 def triangulate_nviews(P, ip):
     """

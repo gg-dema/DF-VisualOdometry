@@ -1,4 +1,5 @@
 from flow_net.flow_net_ui import Flow_net_ui 
+from flow_net.flow_net_ui_older import Flow_net_ui_older 
 from depth_net.depth_net import Depth_net
 import numpy as np
 import PIL.Image
@@ -10,6 +11,7 @@ import torch
 from scale_recovery import simple_scale_recovery
 import os
 from utils import *
+import cv2
 
 
 
@@ -34,16 +36,22 @@ def main():
 
     folder_path = 'data_odometry_color/dataset/sequences/'+seq+'/image_2'
     i = -1
-    
+    save_path="curva"
     # Iterate through the files in the folder
     save = True
+    preds = {}
     if save:
-        file = open("preds/preds_"+seq+"_trackerv4_pnp2.txt", 'ab')
+        file = open("preds/preds_"+save_path+".txt", 'ab')
     for filename in os.listdir(folder_path):    
-        
+        #break
         file_path = os.path.join(folder_path, filename)
         if i == -1:
             abs_pred = ground_truth[0]
+            path_2 = file_path
+            i += 1
+            continue
+        if i <40:
+            abs_pred = ground_truth[i]
             path_2 = file_path
             i += 1
             continue
@@ -54,11 +62,14 @@ def main():
         path_1 = path_2
         path_2 = file_path
 
-        #is forward really needed here?
-        cols, rows, matched_cols, matched_rows = flow_ui.get_matches(path_1, path_2)
-
-        kp1 = np.array((rows, cols)).T
-        kp2 = np.array((matched_rows, matched_cols)).T
+        cols, rows, matched_cols, matched_rows = flow_ui.get_matches(path_1, path_2, mode = "local_top_k", draw = False)
+        """Check using random keypoints"""
+        #rows = np.random.randint(0, 192, size=len(rows))
+        #cols = np.random.randint(0, 640, size=len(cols))
+        #matched_rows = np.random.randint(0, 192, size=len(rows))
+        #matched_cols = np.random.randint(0, 640, size=len(cols))
+        kp1 = np.array((rows, cols)).T.astype(np.float64)
+        kp2 = np.array((matched_rows, matched_cols)).T.astype(np.float64)
         depth = depNetwork.predict(path_1)
         row_indices_tensor = torch.tensor(rows)
         col_indices_tensor = torch.tensor(cols)
@@ -76,12 +87,14 @@ def main():
 
         pose = tracker_ui.get_pose_from_2d(kp1, kp2)
         if pose is None:
-             print("E-tracker failure, using Pnp")
-             pose = tracker_ui.get_pose_from_3d(kp1, kp2, z)
-        R = pose['R']
+            print("E-tracker failure, using Pnp")
+            pose = tracker_ui.get_pose_from_3d(kp1, kp2, z)
+        R = pose['R'].T
         t = pose['t'].flatten().T
         s=1
-        #s = simple_scale_recovery(kp1.T, kp2.T, R, t, torch.FloatTensor(cam_prop.intrinsics_matrix), z.detach().numpy())
+        #s = simple_scale_recovery(kp1.T, kp2.T, curr_gt[:3,:3], curr_gt[:3,3], cam_prop.intrinsics_matrix, z)
+        
+        #s = simple_scale_recovery(kp1.T, kp2.T, R, t, cam_prop.intrinsics_matrix, z)
         #st = s*t
         """
         curr_pred = np.zeros(size=(4,4))
@@ -92,22 +105,25 @@ def main():
         curr_pred = np.eye(4) #init current absolute pose
         curr_pred[:3,3] = abs_pred[:3,:3] @ t + abs_pred[:3,3] #compute current absolute translation
         curr_pred[:3,:3] = abs_pred[:3,:3] @ R #compute current absolute rotation
+        print(curr_pred)
         abs_pred = curr_pred #update the absolute pose predicted so far
 
         if save:
-                
                 line = ' '.join(str(value) for value in curr_pred[:3,:].flatten())
                 line += '\n'
                 file.write(line.encode())
+        preds[i-1]=curr_pred
 
-        
-        if i == 1:
-            pred_0 = curr_pred
         r_error, t_error = compute_error(gt_0 = np.eye(4), pred_0 = np.eye(4), curr_gt = curr_gt, curr_pred = curr_pred)
-        print(curr_gt[:3,3], curr_pred[:3,3])
-        print(i, r_error, t_error, s)
+        print("____________________________________")
+        print("frame number:", i,"absolute R error:", r_error,"absolute t error:", t_error, s)   
+        print("rotation around euler axis for relative rotation: ", rotationMatrixToEulerAngles(R), "relative translation:", t)#printing rotation around y
+        print("rotation around euler axis for ground truth: ", rotationMatrixToEulerAngles(curr_gt[:3,:3] ), "and predicted:", rotationMatrixToEulerAngles(curr_pred[:3,:3] ))#printing rotation around y
+        print("translation vector gt: ",curr_gt[:3,3],"predicted:", curr_pred[:3,3])#printing the translation vector at each iteration
+        if i == 65 and True:
+             break
 
-    preds = load_poses_from_txt("preds/preds_"+seq+"_trackerv4_pnp2.txt")
+    #preds = load_poses_from_txt("preds/preds_"+save_path+".txt")
     pred_0 = preds[0]
     curr_pred = np.eye(4)
     gt_0=ground_truth[0]
@@ -137,7 +153,7 @@ def main():
         print(i, r_error, t_error, abs_pred[:3,3], ground_truth[i][:3,3])
         print("_________________________________")
         #previous_gt = ground_truth[i]
-    plot_trajectory(ground_truth, preds, 22)
+    plot_trajectory(ground_truth, preds, save_path)
 
 if __name__ == '__main__':
     main()
