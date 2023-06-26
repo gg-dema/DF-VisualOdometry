@@ -3,7 +3,35 @@ import math
 from camera_module import CameraProperty
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+import scipy.linalg
 
+def decompose_projection_matrix(P):
+    # Extract the M matrix (first three columns of P)
+    M = P[:, :3]
+
+    # Perform RQ decomposition on M
+    K, R = scipy.linalg.rq(M)
+
+    # Make sure the intrinsic matrix has positive diagonal elements
+    T = np.diag(np.sign(np.diag(K)))
+    K = np.dot(K, T)
+    R = np.dot(T, R)
+
+    # Compute the last column of the extrinsic matrix
+    last_column = np.linalg.solve(K, P[:, 3])
+
+    # Concatenate R and the last column to form the extrinsic matrix
+    E = np.hstack((R, last_column.reshape(3, 1)))
+
+    return K, E
+
+
+def normalize_points(points):
+    centroid = np.mean(points, axis=0)
+    centered_points = points - centroid
+    avg_distance = np.mean(np.linalg.norm(centered_points, axis=1))
+    normalized_points = centered_points / avg_distance
+    return normalized_points, centroid, avg_distance
 
 # Checks if a matrix is a valid rotation matrix.
 def isRotationMatrix(R) :
@@ -33,7 +61,7 @@ def rotationMatrixToEulerAngles(R) :
         y = math.atan2(-R[2,0], sy)
         z = 0
  
-    return np.array([x, y, z])
+    return np.array([x, y, z])*57.2958
 
 def plot_trajectory(poses_gt, poses_result, seq):
         """Plot trajectory for both GT and prediction
@@ -67,8 +95,8 @@ def plot_trajectory(poses_gt, poses_result, seq):
                 pose = poses_dict[key][frame_idx]
                 pos_xyz.append([pose[0, 3], pose[1, 3], pose[2, 3]])
             pos_xyz = np.asarray(pos_xyz)
-            plt.plot(pos_xyz[:, 0],  pos_xyz[:, 2], label=key, c=color_list[key], linestyle=linestyle[key])
-
+            if key == "Ours":plt.plot(pos_xyz[:, 0],  pos_xyz[:, 1], label=key, c=color_list[key], linestyle=linestyle[key])
+            else: plt.plot(pos_xyz[:, 0],  pos_xyz[:, 2], label=key, c=color_list[key], linestyle=linestyle[key])
             # Draw rect
             if key == 'Ground Truth':
                 rect = mpl.patches.Rectangle((pos_xyz[0, 0]-5, pos_xyz[0, 2]-5), 10,10, linewidth=2, edgecolor='k', facecolor='none')
@@ -82,7 +110,7 @@ def plot_trajectory(poses_gt, poses_result, seq):
         plt.grid(linestyle="--")
         fig.set_size_inches(10, 10)
         png_title = "sequence_{}".format(seq)
-        fig_pdf = png_title + "test_loro.pdf"
+        fig_pdf = png_title + ".pdf"
         plt.savefig(fig_pdf, bbox_inches='tight', pad_inches=0)
         plt.close(fig)
 
