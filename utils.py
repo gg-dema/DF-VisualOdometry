@@ -3,147 +3,104 @@ import math
 from camera_module import CameraProperty
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-import scipy.linalg
+import h5py
 
-def decompose_projection_matrix(P):
-    # Extract the M matrix (first three columns of P)
-    M = P[:, :3]
-
-    # Perform RQ decomposition on M
-    K, R = scipy.linalg.rq(M)
-
-    # Make sure the intrinsic matrix has positive diagonal elements
-    T = np.diag(np.sign(np.diag(K)))
-    K = np.dot(K, T)
-    R = np.dot(T, R)
-
-    # Compute the last column of the extrinsic matrix
-    last_column = np.linalg.solve(K, P[:, 3])
-
-    # Concatenate R and the last column to form the extrinsic matrix
-    E = np.hstack((R, last_column.reshape(3, 1)))
-
-    return K, E
-
-
-def normalize_points(points):
-    centroid = np.mean(points, axis=0)
-    centered_points = points - centroid
-    avg_distance = np.mean(np.linalg.norm(centered_points, axis=1))
-    normalized_points = centered_points / avg_distance
-    return normalized_points, centroid, avg_distance
-
-# Checks if a matrix is a valid rotation matrix.
-def isRotationMatrix(R) :
-    Rt = np.transpose(R)
-    shouldBeIdentity = np.dot(Rt, R)
-    I = np.identity(3, dtype = R.dtype)
-    n = np.linalg.norm(I - shouldBeIdentity)
-    return n < 1e-6
- 
-# Calculates rotation matrix to euler angles
-# The result is the same as MATLAB except the order
-# of the euler angles ( x and z are swapped ).
-def rotationMatrixToEulerAngles(R) :
- 
-    assert(isRotationMatrix(R))
- 
-    sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
- 
-    singular = sy < 1e-6
- 
-    if  not singular :
-        x = math.atan2(R[2,1] , R[2,2])
-        y = math.atan2(-R[2,0], sy)
-        z = math.atan2(R[1,0], R[0,0])
-    else :
-        x = math.atan2(-R[1,2], R[1,1])
-        y = math.atan2(-R[2,0], sy)
-        z = 0
- 
-    return np.array([x, y, z])*57.2958
-
-def plot_trajectory(poses_gt, poses_result, seq):
+def plot_trajectory_drone(poses_gt, poses_preds, output):
         """Plot trajectory for both GT and prediction
-        
-        Args:
-            poses_gt (dict): {idx: 4x4 array}; ground truth poses
-            poses_result (dict): {idx: 4x4 array}; predicted poses
-            seq (int): sequence index.
         """
-        plot_keys = ["Ground Truth", "Ours"]
-        fontsize_ = 20
-
-        poses_dict = {}
-        poses_dict["Ground Truth"] = poses_gt
-        poses_dict["Ours"] = poses_result
-
-        color_list = {"Ground Truth": 'k',
-                      "Ours": 'lime'}
-        linestyle = {"Ground Truth": "--",
-                     "Ours": "-"}
-
         fig = plt.figure()
         ax = plt.gca()
         ax.set_aspect('equal')
 
-        for key in plot_keys:
-            pos_xyz = []
-            frame_idx_list = sorted(poses_dict["Ours"].keys())
-            for frame_idx in frame_idx_list:
-                # pose = np.linalg.inv(poses_dict[key][frame_idx_list[0]]) @ poses_dict[key][frame_idx]
-                pose = poses_dict[key][frame_idx]
-                pos_xyz.append([pose[0, 3], pose[1, 3], pose[2, 3]])
-            pos_xyz = np.asarray(pos_xyz)
-            if key == "Ours":plt.plot(pos_xyz[:, 0],  pos_xyz[:, 1], label=key, c=color_list[key], linestyle=linestyle[key])
-            else: plt.plot(pos_xyz[:, 0],  pos_xyz[:, 2], label=key, c=color_list[key], linestyle=linestyle[key])
-            # Draw rect
-            if key == 'Ground Truth':
-                rect = mpl.patches.Rectangle((pos_xyz[0, 0]-5, pos_xyz[0, 2]-5), 10,10, linewidth=2, edgecolor='k', facecolor='none')
-                ax.add_patch(rect)
+        pose_xy = []
+        for pose in poses_gt:
+            pose_xy.append(pose)
+        pose_xy = np.array(pose_xy)
+        plt.plot(pose_xy[:, 0],  -pose_xy[:, 1], label='Ground Truth', c='k', linestyle='--')
 
-        plt.legend(loc="upper right", prop={'size': fontsize_})
-        plt.xticks(fontsize=fontsize_)
-        plt.yticks(fontsize=fontsize_)
-        plt.xlabel('x (m)', fontsize=fontsize_)
-        plt.ylabel('z (m)', fontsize=fontsize_)
+        pose_xyz = []
+        for pose in poses_preds:
+                pose_xyz.append([pose[0, 3], pose[1, 3], pose[2, 3]])
+        pose_xyz = np.array(pose_xyz)
+        plt.plot(pose_xyz[:, 0],  pose_xyz[:, 1], label='Prediction', c='lime', linestyle='-')
+
+        plt.legend()
+
+        plt.xlabel('x (m)' )
+        plt.ylabel('y (m)' )
         plt.grid(linestyle="--")
-        fig.set_size_inches(10, 10)
-        png_title = "sequence_{}".format(seq)
-        fig_pdf = png_title + ".pdf"
+        png_title = "sequence_{}".format(output)
+        fig_pdf = "plots/"+png_title + ".pdf"
+        plt.savefig(fig_pdf, bbox_inches='tight', pad_inches=0)
+        plt.close(fig)
+
+def plot_trajectory(poses_gt, poses_preds, output):
+        """Plot trajectory for both GT and prediction
+        """
+        
+        fig = plt.figure()
+        ax = plt.gca()
+        ax.set_aspect('equal')
+        pose_xyz = []
+        for pose in poses_preds:
+                pose_xyz.append([pose[0, 3], pose[1, 3], pose[2, 3]])
+        pose_xyz = np.array(pose_xyz)
+        plt.plot(-pose_xyz[:, 1],  -pose_xyz[:, 2], label='Prediction', c='lime', linestyle='-')
+
+        traj_len = len(pose_xyz)
+        pose_xyz = []
+        for i,pose in enumerate(poses_gt):
+            pose_xyz.append([pose[0, 3], pose[1, 3], pose[2, 3]])
+            if i>traj_len: break
+        pose_xyz = np.array(pose_xyz)
+        plt.plot(pose_xyz[:, 0],  pose_xyz[:, 2], label='Ground Truth', c='k', linestyle='--')
+
+
+        plt.legend()
+
+        plt.xlabel('x (m)' )
+        plt.ylabel('y (m)' )
+        plt.grid(linestyle="--")
+        png_title = "sequence_{}".format(output)
+        fig_pdf = "plots/"+png_title + ".pdf"
         plt.savefig(fig_pdf, bbox_inches='tight', pad_inches=0)
         plt.close(fig)
 
 
 def load_poses_from_txt(file_name):
-    """Load poses from txt (KITTI format)
-    Each line in the file should follow one of the following structures
-        (1) idx pose(3x4 matrix in terms of 12 numbers)
-        (2) pose(3x4 matrix in terms of 12 numbers)
+    """
+    Poses are expressed by a 3x4 matrix composed of rotation matrix R and translation vector t.
+    """
+    f = open(file_name, 'r')
+    s = f.readlines()
+    f.close()
+    poses = []
+    for line in s:
+        P = np.eye(4)
+        line_split = [float(i) for i in line.split(" ") if i!=""]
+        for row in range(3):
+            for col in range(4):
+                P[row, col] = line_split[row*4 + col]
+        poses.append(P)
+    return poses
 
-    Args:
-        file_name (str): txt file path
-    
-    Returns:
-        poses (dict): {idx: [4x4] array}
+def load_poses_from_txt_gt_drone(file_name):
+    """
+    poses for this dataset are expressed as 9 values, 
+    the values at index 1,2,3 indicate the position x,y,z.
+    We are interested in the position x,y
     """
     f = open(file_name, 'r')
     s = f.readlines()
     f.close()
     poses = {}
-    for cnt, line in enumerate(s):
-        P = np.eye(4)
-        line_split = [float(i) for i in line.split(" ") if i!=""]
-        withIdx = len(line_split) == 13
-        for row in range(3):
-            for col in range(4):
-                P[row, col] = line_split[row*4 + col + withIdx]
-        if withIdx:
-            frame_idx = line_split[0]
-        else:
-            frame_idx = cnt
-        poses[frame_idx] = P
-    return poses
+    X, Y = [], []
+    with open(file_name, 'r') as f:
+        file = f.read()
+        lines = file.split('\n')[:-1]
+    pose = [[float(line.split(' ')[1]), float(line.split(' ')[2])] for line in lines]
+    
+    return pose
 
 
 def rotation_error(pose_error):
@@ -191,32 +148,3 @@ def compute_error(gt_0, pred_0, curr_gt, curr_pred):
     t_error = translation_error(rel_err)
     r_error = rotation_error(rel_err)
     return r_error, t_error
-
-def cam_stuff(seq):
-        # Path to the calib.txt file
-    calib_file = 'data_odometry_color/dataset/sequences/'+seq+'/calib.txt'
-
-    # Read the calib.txt file
-    with open(calib_file, 'r') as file:
-        calib_data = file.readlines()
-
-    # Extract the camera matrix P0 (or P1, P2, P3) from the calib_data
-    p_matrix = calib_data[2].strip().split(' ')[1:]  # Assuming P0 is in the first line
-
-    # Parse the P matrix values
-    p_matrix_values = [float(val) for val in p_matrix]
-
-    # Reshape the values into a 3x4 matrix
-    p_matrix_array = np.array(p_matrix_values).reshape(3, 4)
-
-    # Extract the intrinsic matrix from the camera matrix
-    intrinsic_matrix = p_matrix_array[:, :3]
-
-    print("Intrinsic Matrix:")
-    print(intrinsic_matrix)
-    cam_prop = CameraProperty(np.array(intrinsic_matrix))
-
-    
-    config_dict = {'robust_tracker': False,
-                   'numb_robust_iter': 10}
-    return cam_prop, config_dict

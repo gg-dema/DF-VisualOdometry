@@ -1,5 +1,4 @@
 from typing import Optional, Dict
-from camera_module import CameraProperty
 import numpy as np
 import cv2
 
@@ -135,8 +134,8 @@ class ETracker:
                                            focal=self.camera_prop.fx,
                                            pp=(self.camera_prop.px_0, self.camera_prop.py_0),
                                            )
-        #if not self.valid_estimation(E_matrix, kp1, kp2):
-        #    return None
+        if not self.valid_estimation(E_matrix, kp1, kp2):
+            return None
         return E_matrix
 
     def robust_E_estimation(self, kp1, kp2, iteration=10) -> Optional[np.array]:
@@ -255,54 +254,3 @@ class TrackerInterface:
             return self.pnp_tracker.pose_estimation(kp1, kp2, depth, robust=True, iter=self.config_dict['numb_robust_iter'])
         else:
             return self.pnp_tracker.pose_estimation(kp1, kp2, depth)
-
-
-""" main just for testing """
-"""
-if __name__ == '__main__':
-    import pickle
-
-    def load_point_3d(path):
-        with open(path, 'rb') as f:
-            kp1x, kp1y, z, kp2x, kp2y = pickle.load(f)
-        kp1 = np.array((kp1x, kp1y)).T
-        kp2 = np.array((kp2x, kp2y)).T
-        z = z.detach().numpy()
-        return kp1, kp2, z
-
-    def load_point_2d(path):
-        with open(path, 'rb') as f:
-            kp1x, kp1y, kp2x, kp2y = pickle.load(f)
-
-        kp1 = np.array((kp1x, kp1y)).T
-        kp2 = np.array((kp2x, kp2y)).T
-        return kp1, kp2
-
-    default_camera_calib = [
-        [718.856, 0.00000, 607.1928],
-        [0.00000, 718.856, 185.2157],
-        [0.00000, 0.00000, 1.000000],
-]
-    cam_prop = CameraProperty(np.array(default_camera_calib))
-    config_dict = {'robust_tracker': False,
-                   'numb_robust_iter': 10}
-    tracker_ui = TrackerInterface(cam_prop, config_dict)
-
-    # test 2d:
-
-    kp1, kp2 = load_point_2d('test/matches.pkl')
-    print('\t E_tracker')
-    pose = tracker_ui.get_pose_from_2d(kp1, kp2)
-    print('R:', pose['R'])
-    print('t', pose['t'])
-
-    # TO INSERT:  giusto per visualizzare un possibile flusso di lavoro
-    # pose_re_scaled = SCALE_POSE(pose, IDK_WTF_U_NEED)
-
-    # test 3d
-    print('\t PNP_tracker')
-    kp1, kp2, z = load_point_3d('test/matches_with_depth.pkl')
-    pose = tracker_ui.get_pose_from_3d(kp1, kp2, z)
-    print('R:', pose['R'])
-    print('t', pose['t'])
-"""
