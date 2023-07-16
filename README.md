@@ -12,6 +12,7 @@ It's composed of 2 different trackers, the E-tracker, (based on the epipolar con
 
 
 [Reference paper: DFVO-Visual Odometry Revisited: What Should Be Learnt?](https://arxiv.org/abs/1909.09803)
+![image](https://github.com/gg-Dema/DF-VisualOdometry/assets/99049717/a5a434cb-0223-43ea-aafb-f6c7a764bad4)
 
 
 
