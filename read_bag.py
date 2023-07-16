@@ -1,9 +1,11 @@
-#!/usr/bin/env python
-import rosbags
+import cv2
 import numpy as np
 from pathlib import Path
 from rosbags.highlevel import AnyReader
-import cv2
+
+
+"""
+Utils to load images from a rosbag, it is needed since the drone dataset is found in ros bags"""
 
 STEP = 5 #how many frames to skip
 
@@ -23,7 +25,7 @@ with AnyReader([Path("data_drone/40_4.bag")]) as reader:
         img = np.stack(arrays=(video[i,:,:], video[i,:,:], video[i,:,:])).transpose(1,2,0)
         i = str(i).zfill(5)
         print(i)
-        cv2.imwrite("data_drone/imgs_60_step_5/"+str(i) + ".jpg", img)  
+        cv2.imwrite("data_drone/imgs_40_step_5/"+str(i) + ".jpg", img)  
 
 
 

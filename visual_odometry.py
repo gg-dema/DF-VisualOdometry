@@ -6,6 +6,8 @@ from depth_net.depth_net import Depth_net
 from tracker.tracker_v4 import TrackerInterface
 from utils import *
 
+"""
+Implementation fo DFVO algorithm. Compute the trajectory given a sequence of consecutive frames """
 
 class VisualOdometry:
     
@@ -27,8 +29,7 @@ class VisualOdometry:
             file_path = os.path.join(self.folder_path, filename)
             #to make a prediction we need consecutive frames, so we skip the first one, and start by comparing the first frame with the second
             if i == -1:
-                #we initialize the absolute pose predicted with the first element of the ground truth. I tought this would solve the problem of having
-                #our prediction go the wrong way from the start, but it didn't.
+                #we initialize the absolute pose predicted with an identity matrix
                 abs_pred = np.eye(4)
                 path_2 = file_path
                 i += 1
@@ -38,7 +39,7 @@ class VisualOdometry:
             
             path_1 = path_2
             path_2 = file_path
-            print(path_1, path_2)
+
             #obtain matches from flow net
             cols, rows, matched_cols, matched_rows = self.flow_ui.get_matches(path_1, path_2, mode = "local_top_k", draw = False, dataset=self.dataset)
 

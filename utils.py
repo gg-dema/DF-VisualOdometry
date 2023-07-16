@@ -7,14 +7,13 @@ import h5py
 
 def plot_trajectory_drone(poses_gt, poses_preds, output):
         """Plot trajectory for both GT and prediction
+        We make some adjustments to the axis, to account for position of the camera w.r.t World frame
         """
         fig = plt.figure()
         ax = plt.gca()
         ax.set_aspect('equal')
 
-        pose_xy = []
-        for pose in poses_gt:
-            pose_xy.append(pose)
+        pose_xy = poses_gt
         pose_xy = np.array(pose_xy)
         plt.plot(pose_xy[:, 0],  -pose_xy[:, 1], label='Ground Truth', c='k', linestyle='--')
 
@@ -36,6 +35,7 @@ def plot_trajectory_drone(poses_gt, poses_preds, output):
 
 def plot_trajectory(poses_gt, poses_preds, output):
         """Plot trajectory for both GT and prediction
+        We make some adjustments to the axis, to account for position of the camera w.r.t World frame
         """
         
         fig = plt.figure()
@@ -103,48 +103,38 @@ def load_poses_from_txt_gt_drone(file_name):
     return pose
 
 
-def rotation_error(pose_error):
-    """Compute rotation error
-    
-    Args:
-        pose_error (array, [4x4]): relative pose error
-    
-    Returns:
-        rot_error (float): rotation error
-    """
-    a = pose_error[0, 0]
-    b = pose_error[1, 1]
-    c = pose_error[2, 2]
-    d = 0.5*(a+b+c-1.0)
-    rot_error = np.arccos(max(min(d, 1.0), -1.0))
-    return rot_error
+def compute_translation_error(gt, preds):
+    #Compute the translation error within the last position of the ground truth and our prediction
+    last_pose_gt = np.array(gt[len(preds)])
+    last_pose_pred = np.array(preds[-1])
 
-def translation_error(pose_error):
-    """Compute translation error
+    total = (last_pose_gt[0,3] - (-last_pose_pred[1,3]))**2 + (last_pose_gt[2,3] - (-last_pose_pred[2,3]))**2
     
-    Args:
-        pose_error (array, [4x4]): relative pose error
+    #Comput the relative translation error within consecutive frames
+    old_pose_gt = np.array(gt[0])
+    old_pose_pred = np.array(preds[0])
+    total_rel = 0
+
+    for i in range(len(preds)):
+        curr_pose_gt = np.array(gt[i])
+        curr_pose_pred = np.array(preds[i])
+
+        relative = (  (curr_pose_gt[0,3] - old_pose_gt[0,3]) - (-curr_pose_pred[1,3] + old_pose_pred[1,3])  )**2 \
+                    + (  (curr_pose_gt[2,3] - old_pose_gt[2,3])  - (-curr_pose_pred[2,3] + old_pose_pred[2,3])    )**2
+
+        total_rel += relative
+        old_pose_gt = curr_pose_gt
+        old_pose_pred = curr_pose_pred
+    return total, total_rel/len(preds)
+
+def compute_translation_error_drone(gt, preds):
+    #Compute the translation error within the last position of the ground truth and our prediction
     
-    Returns:
-        trans_error (float): translation error
-    """
-    dx = pose_error[0, 3]
-    dy = pose_error[1, 3]
-    dz = pose_error[2, 3]
-    trans_error = np.sqrt(dx**2+dy**2+dz**2)
-    return trans_error
+    last_pose_gt = np.array(gt[-1])
+    last_pose_pred = np.array(preds[-1])
+    print(last_pose_gt[0], last_pose_pred[0,3], last_pose_gt[1], last_pose_pred[1,3])
+    total = (last_pose_gt[0] - (-last_pose_pred[0,3]))**2 + (-last_pose_gt[1] - last_pose_pred[1,3])**2
 
-
-def compute_error(gt_0, pred_0, curr_gt, curr_pred):
-    gt1 = gt_0
-    gt2 = curr_gt
-    gt_rel = np.linalg.inv(gt1) @ gt2
-
-    pred1 = pred_0
-    pred2 = curr_pred
-    pred_rel = np.linalg.inv(pred1) @ pred2
-    rel_err = np.linalg.inv(gt_rel) @ pred_rel
+    #The ground truth provided for the drone daatset doesn't allow us to compute the relative translation error sadly
     
-    t_error = translation_error(rel_err)
-    r_error = rotation_error(rel_err)
-    return r_error, t_error
+    return total
